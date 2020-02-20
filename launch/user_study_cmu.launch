@@ -2,10 +2,13 @@
 
   <arg name="namespace" default="/dvrk/"/>
   <arg name="master" default="MTMR"/>   
-  <arg name="slave" default="PSM2"/>
-  <arg name="screen_one" default="2"/>
+
+  <arg name="screen_one" default="3"/>
   <arg name="screen_two" default="1"/>
-  <arg name="scale" default=".95" />
+
+  <arg name="slave" default="PSM1"/>   
+  <arg name="scale" default="1" />
+  
   <arg name="camera_registration" default="$(find dvrk_vision)/defaults/registration_params_cmu.yaml" />
 
   <include file="$(find dvrk_vision)/launch/just_cams_cmu.launch" />
