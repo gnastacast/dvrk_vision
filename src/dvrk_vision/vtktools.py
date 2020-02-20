@@ -208,6 +208,7 @@ class zBuff:
 
     def GetOutput(self):
         # self.renWin.Render()
+        # self.renWin.ResetCameraClippingRange()
         self.zBuffFilter.Modified()
         self.scaledZBuff.Update()
         return self.scaledZBuff.GetOutput()

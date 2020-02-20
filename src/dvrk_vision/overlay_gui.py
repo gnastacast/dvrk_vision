@@ -99,7 +99,7 @@ class OverlayWidget(QWidget):
         self.vtkWidget.Initialize()
         self.vtkWidget.start()
 
-    def setMeshPath(self, meshPath, scale):
+    def setMeshPath(self, meshPath, scale, image=None):
         self.meshPath = meshPath
         self.scale = scale
         # Set up 3D actor for organ

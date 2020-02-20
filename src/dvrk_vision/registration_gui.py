@@ -133,7 +133,7 @@ class RegistrationWidget(QWidget):
         self.zRenWin.AddRenderer(self.zRen)
         self.zRenWin.SetOffScreenRendering(1)
         imgDims = self.vtkWidget.cam.image.shape
-        self.zRenWin.SetSize(imgDims[1],imgDims[0])
+        self.zRenWin.SetSize(imgDims[1]//2,imgDims[0]//2)
         self.zRen.SetActiveCamera(self.vtkWidget.ren.GetActiveCamera())
         self.zRen.AddActor(self.actor_moving)
         self.zBuff = vtktools.zBuff(self.zRenWin)
@@ -184,11 +184,12 @@ class RegistrationWidget(QWidget):
     def imageProc(self, image):
         self.segmentation.setImage(image)
         if self.renderMaskCheckBox.isChecked():
-            self.zRen.ResetCameraClippingRange()
+            # self.zRen.ResetCameraClippingRange()
             mask = vtktools.vtkImageToNumpy(self.zBuff.GetOutput())
+            mask = cv2.resize(mask, (self.segmentation.image.shape[1], self.segmentation.image.shape[0]))
             mask = np.where(mask>1,1,0).astype('uint8')
             kernel = np.ones((5,5),np.uint8)
-            self.segmentation.mask = cv2.dilate(mask[:,:,0], kernel)
+            self.segmentation.mask = cv2.dilate(mask[:,:], kernel)
         self.maskPub.publish(self.bridge.cv2_to_imgmsg(self.segmentation.mask*255, "mono8"))
         return self.segmentation.getMaskedImage()
 
