@@ -1,0 +1,6 @@
+<launch>
+  <include file="$(find dvrk_vision)/launch/just_cams_sparkfun.launch">
+  </include>
+  <node name="window_l" pkg="rqt_image_view" type="rqt_image_view" required="true"/>
+  <node name="window_r" pkg="rqt_image_view" type="rqt_image_view" required="true"/>
+</launch>
