@@ -13,9 +13,43 @@ from image_geometry import StereoCameraModel
 from sensor_msgs.msg import CameraInfo
 from geometry_msgs.msg import Pose
 from tf_conversions import posemath
-
+import tf2_ros
+import tf2_msgs.msg
+import geometry_msgs.msg
 
 _WINDOW_NAME = "Registration"
+
+def arrayToPyKDLFrame(array):
+    rot = arrayToPyKDLRotation(array)
+    pos = PyKDL.Vector(array[0][3],array[1][3],array[2][3])
+    return PyKDL.Frame(rot,pos)
+
+def arrayToPyKDLRotation(array):
+    x = PyKDL.Vector(array[0][0], array[1][0], array[2][0])
+    y = PyKDL.Vector(array[0][1], array[1][1], array[2][1])
+    z = PyKDL.Vector(array[0][2], array[1][2], array[2][2])
+    return PyKDL.Rotation(x,y,z)
+
+def pubTF(pose, parentName, childName):
+    br = tf2_ros.TransformBroadcaster()
+    t = geometry_msgs.msg.TransformStamped()
+
+    t.header.stamp = rospy.Time.now()
+    t.header.frame_id = parentName
+    t.child_frame_id = childName
+
+    transform = posemath.toTf(pose)
+
+    t.transform.translation.x = transform[0][0]
+    t.transform.translation.y = transform[0][1]
+    t.transform.translation.z = transform[0][2]
+
+    t.transform.rotation.x = transform[1][0]
+    t.transform.rotation.y = transform[1][1]
+    t.transform.rotation.z = transform[1][2]
+    t.transform.rotation.w = transform[1][3]
+
+    br.sendTransform(t)
 
 def combineImages(imageL, imageR):
     (rows,cols) = imageL.shape[0:2]
@@ -113,6 +147,10 @@ def generateRandomPoint(xMinMax, yMinMax, zMinMax):
         randomPoint[idx] = r * (minMax[1] - minMax[0]) + minMax[0]
     return randomPoint
 
+def getOffset(robotPosition, toolOffset):
+    offset = robotPosition.M * PyKDL.Vector(toolOffset[0], toolOffset[1], toolOffset[2])
+    return np.array([offset.x(), offset.y(), offset.z()])
+
 def displayRegistration(cams, camModel, toolOffset, camTransform, tfSync, started=False, affine=None):
     rate = rospy.Rate(15) # 15hz
     while not rospy.is_shutdown():
@@ -122,11 +160,13 @@ def displayRegistration(cams, camModel, toolOffset, camTransform, tfSync, starte
 
         # Wait for images to exist
         if type(imageR) == type(None) or type(imageL) == type(None):
+            rate.sleep()
             continue
 
         # Check we have valid images
         (rows,cols,channels) = imageL.shape
         if cols < 60 or rows < 60 or imageL.shape != imageR.shape:
+            rate.sleep()
             continue
 
         t = cams.camL.info.header.stamp
@@ -135,12 +175,12 @@ def displayRegistration(cams, camModel, toolOffset, camTransform, tfSync, starte
 
 
         # Find 3D position of end effector
-        zVector = robotPosition.M.UnitZ()
+        offset = getOffset(robotPosition, toolOffset)
         pVector = robotPosition.p
-        offset = np.array([zVector.x(), zVector.y(), zVector.z(), 0])
-        offset = offset * toolOffset
-        pos = np.matrix([pVector.x(), pVector.y(), pVector.z(), 1]) + offset;
-        pos = pos.transpose()
+        pos = np.matrix([pVector.x(), pVector.y(), pVector.z()]) + offset;
+        pos = np.vstack((pos.transpose(), [1]))
+        pubTF(robotPosition, tfSync.frames[0], 'get_position')
+        pubTF(PyKDL.Frame(PyKDL.Rotation(), PyKDL.Vector(pos[0], pos[1], pos[2])), tfSync.frames[0], 'tip_pose')
         if affine is None:
             pos = np.linalg.inv(camTransform) * pos
         else:
@@ -221,10 +261,6 @@ def getRegistrationPoints(points, robot, cams, camModel, toolOffset, tfSync):
         rospy.sleep(.1)
         pBuffer = deque([], 50)
         rBuffer = deque([], 50)
-        position = posemath.fromMsg(tfSync.synchedMessages[0].pose)
-        zVector = robot.get_current_position().M.UnitZ()
-        offset = np.array([zVector.x(), zVector.y(), zVector.z()])
-        offset = offset * toolOffset
         startTime = rospy.get_time()
 
         while rospy.get_time() - startTime < 2 or b_stopMotion:
@@ -244,7 +280,9 @@ def getRegistrationPoints(points, robot, cams, camModel, toolOffset, tfSync):
             rate.sleep()
             if point3d != None:
                 pBuffer.append(point3d)
-                pVector = robot.get_current_position().p
+                robotPosition = robot.get_current_position()
+                offset = getOffset(robotPosition, toolOffset)
+                pVector = robotPosition.p
                 pos = np.array([pVector.x(), pVector.y(), pVector.z()]) + offset
                 rBuffer.append(pos)
                 
@@ -289,7 +327,7 @@ def main():
                         topics = ['/dvrk/' + psmName + '/position_cartesian_current'],
                         frames = [psmName + '_psm_base_link',
                                   psmName + '_tool_wrist_link',
-                                  psmName + '_tool_wrist_caudier_link_shaft'])
+                                  psmName + '_tool_wrist_sca_shaft_link'])
 
     camModel = StereoCameraModel()
     topicLeft = rospy.resolve_name("left/camera_info")
@@ -304,7 +342,6 @@ def main():
     with open(filePath, 'r') as f:
         data = yaml.load(f)
     if any (k not in data for k in ['H', 'minS', 'minV', 'maxV', 'transform', 'points']):
-
         rospy.logfatal('dVRK Registration: ' + filePath +
                        ' empty or malformed.')
         quit()
@@ -327,7 +364,6 @@ def main():
     # Main registration
     (pointsA, pointsB) = getRegistrationPoints(points, robot, cams, camModel, toolOffset, tfSync)
     transform, transform2 = calculateRegistration(pointsA, pointsB)
-    
 
     # Save all parameters to YAML file
     data['transform'] = transform.tolist()
@@ -338,8 +374,7 @@ def main():
     data['maxV'] = cv2.getTrackbarPos('max V',_WINDOW_NAME)
     with open(filePath, 'w') as f:
         yaml.dump(data,f)
-
-
+        print("Saved to " + filePath)
 
     # Publish transform as message to camera_transform_pub
     msg = posemath.toMsg(posemath.fromMatrix(transform))
