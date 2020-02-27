@@ -88,12 +88,12 @@ class CameraSync(object):
                 the list of frames provided during initialization
 
             baseFrame (string): Frame to use as base to calculate all transformations
-                if one isn't provided, the camera frame is used as the base frame
+                if one isn't provided, 'world' is used as the base frame
 
         Returns:
             transforms (list[geometry_msgs/Transform]): The transforms found at the last camera time
         """
-        if frames == None:
+        if frames is None:
             frames = self.frames
         if baseFrame is None:
             baseFrame = self.baseFrame
@@ -114,7 +114,7 @@ class CameraSync(object):
                                                             rospy.Duration(0.01))
                 transforms.append(transform)
             except tf2_ros.TransformException as e:
-                pass
+                rospy.logwarn_throttle(60, e)
         return transforms
         
 

@@ -169,9 +169,8 @@ def displayRegistration(cams, camModel, toolOffset, camTransform, tfSync, starte
             rate.sleep()
             continue
 
-
+        # Get position
         if targetLink is None:
-            t = cams.camL.info.header.stamp
             poseMsg = tfSync.synchedMessages[0].pose
             robotPosition = posemath.fromMsg(poseMsg)
 
@@ -182,19 +181,21 @@ def displayRegistration(cams, camModel, toolOffset, camTransform, tfSync, starte
                    transforms[0].transform.translation.z)
             rot = (transforms[0].transform.rotation.x,
                    transforms[0].transform.rotation.y,
-                   transforms[0].transform.rotation.w,
-                   transforms[0].transform.rotation.z)
+                   transforms[0].transform.rotation.z,
+                   transforms[0].transform.rotation.w)
             robotPosition = posemath.fromTf((pos,rot))
 
 
         # Find 3D position of end effector
         offset = getOffset(robotPosition, toolOffset)
+
         pVector = robotPosition.p
         pos = np.matrix([pVector.x(), pVector.y(), pVector.z()]) + offset;
         pos = np.vstack((pos.transpose(), [1]))
 
         # Publish TFs for easier debugging
         pubTF(robotPosition, tfSync.frames[0], 'get_position')
+
         pubTF(PyKDL.Frame(PyKDL.Rotation(), PyKDL.Vector(pos[0], pos[1], pos[2])), tfSync.frames[0], 'tip_pose')
 
         # Calculate 3D point in camera space
@@ -212,7 +213,7 @@ def displayRegistration(cams, camModel, toolOffset, camTransform, tfSync, starte
         (rows,cols) = imageL.shape[0:2]
         posR = (posR[0] + cols, posR[1])
 
-        transforms = tfSync.getTransforms(baseFrame=tfSync.frames[0])
+        transforms = tfSync.getTransforms()
         posEnd = posL
         for i in range(0,len(transforms)-1):
 
@@ -263,7 +264,7 @@ def displayRegistration(cams, camModel, toolOffset, camTransform, tfSync, starte
 
         rate.sleep()
 
-def getRegistrationPoints(points, robot, cams, camModel, toolOffset, tfSync):
+def getRegistrationPoints(points, robot, cams, camModel, toolOffset, tfSync, targetLink=None):
     rate = rospy.Rate(15) # 15hz
 
     print points
@@ -297,7 +298,22 @@ def getRegistrationPoints(points, robot, cams, camModel, toolOffset, tfSync):
             rate.sleep()
             if point3d != None:
                 pBuffer.append(point3d)
-                robotPosition = posemath.fromMsg(tfSync.synchedMessages[0].pose)
+                # Get position
+                if targetLink is None:
+                    poseMsg = tfSync.synchedMessages[0].pose
+                    robotPosition = posemath.fromMsg(poseMsg)
+
+                else:
+                    transforms = tfSync.getTransforms([targetLink], tfSync.frames[0])
+                    pos = (transforms[0].transform.translation.x,
+                           transforms[0].transform.translation.y,
+                           transforms[0].transform.translation.z)
+                    rot = (transforms[0].transform.rotation.x,
+                           transforms[0].transform.rotation.y,
+                           transforms[0].transform.rotation.z,
+                           transforms[0].transform.rotation.w)
+                    print(transforms[0])
+                    robotPosition = posemath.fromTf((pos,rot))
                 offset = getOffset(robotPosition, toolOffset)
                 pVector = robotPosition.p
                 pos = np.array([pVector.x(), pVector.y(), pVector.z()]) + offset
@@ -331,12 +347,6 @@ def main():
     from tf_sync import CameraSync
     psmName = rospy.get_param('~arm')
     robot = psm(psmName)
-
-    ignore_tip = True
-    if ignore_tip:
-        targetLink = psmName + '_tool_wrist_sca_link'
-    else:
-        targetLink = None
    
     frameRate = 15
     slop = 1.0 / frameRate
@@ -369,6 +379,11 @@ def main():
                        ' empty or malformed.')
         quit()
 
+    try:
+        targetLink = psmName + data['toolOffsetFrame']
+    except KeyError as e:
+        targetLink = None
+
     cv2.namedWindow(_WINDOW_NAME)
     cv2.createTrackbar('H', _WINDOW_NAME, data['H'], 240, nothingCB)
     cv2.createTrackbar('min S', _WINDOW_NAME, data['minS'], 255, nothingCB)
@@ -385,7 +400,7 @@ def main():
     displayRegistration(cams, camModel, toolOffset, transformOld, tfSync, targetLink=targetLink)
     
     # Main registration
-    (pointsA, pointsB) = getRegistrationPoints(points, robot, cams, camModel, toolOffset, tfSync)
+    (pointsA, pointsB) = getRegistrationPoints(points, robot, cams, camModel, toolOffset, tfSync, targetLink=targetLink)
     transform, transform2 = calculateRegistration(pointsA, pointsB)
 
     # Save all parameters to YAML file
@@ -405,7 +420,7 @@ def main():
     pub.publish(msg)
 
     # Show Registration
-    displayRegistration(cams, camModel, toolOffset, transformOld, tfSync, targetLink=targetLink)
+    displayRegistration(cams, camModel, toolOffset, transform, tfSync, targetLink=targetLink)
 
     print('Done')
     cv2.destroyAllWindows()
